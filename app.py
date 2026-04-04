@@ -64,8 +64,12 @@ with st.sidebar:
     model_choice = st.selectbox("🤖 Chọn mô hình AI:", [
         "google/gemini-2.5-flash",
         "openai/gpt-4o-mini",
-        "google/gemini-1.5-pro",
-        "anthropic/claude-3-haiku"
+        "google/gemini-2.5-flash-lite",
+        "google/gemini-2.0-flash-001"
+        "google/gemini-2.0-flash-lite-001"
+        "openai/gpt-5-nano"
+        "openai/gpt-4.1-nano"
+        "meta-llama/llama-3.2-3b-instruct:free"
     ], help="Gemini 2.5 Flash rất lý tưởng cho các câu thoại vì tốc độ phản hồi cực nhanh!")
     
     st.markdown("---")
