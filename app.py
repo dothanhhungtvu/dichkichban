@@ -4,6 +4,8 @@ import re
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 # Tải cấu hình từ biến môi trường (nếu có .env)
 load_dotenv()
@@ -13,30 +15,66 @@ st.set_page_config(page_title="Dịch Kịch Bản Cùng AI", page_icon="🎬", 
 # CSS tùy chỉnh để làm đẹp giao diện
 st.markdown("""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+    
     .title-box {
         text-align: center;
-        background: linear-gradient(135deg, #FF9A9E 0%, #FECFEF 99%, #FECFEF 100%);
-        padding: 25px;
-        border-radius: 15px;
-        color: #d11a2a;
-        font-family: 'Comic Sans MS', cursive, sans-serif;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        margin-bottom: 25px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 30px;
+        border-radius: 20px;
+        color: white;
+        font-family: 'Inter', sans-serif;
+        box-shadow: 0 8px 32px rgba(102, 126, 234, 0.35);
+        margin-bottom: 30px;
+    }
+    .title-box h1 {
+        color: white !important;
+        font-size: 2rem;
+        margin-bottom: 5px;
+    }
+    .title-box p {
+        color: rgba(255,255,255,0.85);
+        font-size: 1rem;
     }
     .stButton>button {
-        background-color: #ff4b4b !important;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
         color: white !important;
         border-radius: 12px;
         border: none;
-        padding: 10px 20px;
+        padding: 12px 24px;
         font-weight: bold;
         font-size: 16px;
         transition: all 0.3s ease;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
     }
     .stButton>button:hover {
-        background-color: #ff2e2e !important;
-        transform: scale(1.02);
-        box-shadow: 0 3px 6px rgba(0,0,0,0.2);
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+    }
+    .file-card {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.1);
+        border-radius: 16px;
+        padding: 20px;
+        margin-bottom: 15px;
+        backdrop-filter: blur(10px);
+    }
+    .status-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+    }
+    .status-waiting { background: #ffeaa7; color: #2d3436; }
+    .status-processing { background: #74b9ff; color: #2d3436; }
+    .status-done { background: #55efc4; color: #2d3436; }
+    .status-error { background: #ff7675; color: white; }
+    
+    div[data-testid="stExpander"] {
+        border: 1px solid rgba(102, 126, 234, 0.2);
+        border-radius: 12px;
+        margin-bottom: 10px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -44,7 +82,7 @@ st.markdown("""
 st.markdown(
     '<div class="title-box">'
     '<h1>🎬 Máy Dịch Kịch Bản Hoạt Hình Thần Kỳ 🚀</h1>'
-    '<p>Biến kịch bản tiếng Trung cứng nhắc thành câu chuyện cực vui nhộn cho bé!</p>'
+    '<p>Tải lên tối đa <b>5 file TXT</b> cùng lúc — xử lý song song siêu tốc!</p>'
     '</div>', 
     unsafe_allow_html=True
 )
@@ -68,10 +106,17 @@ with st.sidebar:
         "openai/gpt-5-nano",
         "openai/gpt-4.1-nano",
         "meta-llama/llama-3.2-3b-instruct:free",
+        "Tự nhập model ID (Custom)"
     ], help="Gemini 2.5 Flash rất lý tưởng cho các câu thoại vì tốc độ phản hồi cực nhanh!")
     
+    if model_choice == "Tự nhập model ID (Custom)":
+        final_model_choice = st.text_input("✍️ Nhập ID mô hình:", help="Ví dụ: anthropic/claude-3.5-sonnet")
+    else:
+        final_model_choice = model_choice
+    
     st.markdown("---")
-    st.markdown("💡 **Mẹo nhỏ:** Kịch bản sau khi làm sạch sẽ tự động mất đi các tên nhân vật và mốc thời gian thừa!")
+    st.markdown("💡 **Mẹo nhỏ:** Tải lên tối đa 5 file TXT cùng lúc, AI sẽ dịch song song tất cả!")
+
 
 # CÁC HÀM XỬ LÝ (FUNCTIONS)
 def clean_script(text):
@@ -134,107 +179,252 @@ def translate_script(kịch_bản, api_key, model):
     except Exception as e:
         return f"🚨 LỖI TỪ API: {str(e)}"
 
-# MAIN LAYOUT: STATE MANAGEMENT VÀ UPLOAD
-if 'cleaned_text' not in st.session_state:
-    st.session_state.cleaned_text = ""
-if 'translated_text' not in st.session_state:
-    st.session_state.translated_text = ""
+def process_single_file(file_name, raw_text, api_key, model):
+    """Xử lý 1 file: làm sạch → dịch → format TTS. Trả về dict kết quả."""
+    cleaned = clean_script(raw_text)
+    raw_translation = translate_script(cleaned, api_key, model)
+    
+    if raw_translation.startswith("🚨"):
+        return {
+            "file_name": file_name,
+            "cleaned": cleaned,
+            "translated": raw_translation,
+            "status": "error"
+        }
+    
+    formatted = format_for_tts(raw_translation)
+    return {
+        "file_name": file_name,
+        "cleaned": cleaned,
+        "translated": formatted,
+        "status": "done"
+    }
 
-uploaded_file = st.file_uploader(
-    "📥 Cập nhật kịch bản của bạn (Định dạng .txt hoặc .csv phân tách dòng)", 
-    type=["txt", "csv"]
+
+# MAIN LAYOUT: UPLOAD 5 FILES
+st.markdown("### 📂 Tải lên kịch bản (tối đa 5 file TXT)")
+
+uploaded_files = st.file_uploader(
+    "Kéo thả hoặc chọn tối đa 5 file TXT cùng lúc", 
+    type=["txt", "csv"],
+    accept_multiple_files=True,
+    help="Hỗ trợ file .txt và .csv. Tối đa 5 file mỗi lần."
 )
 
-# TIẾN HÀNH ĐỌC FILE KHI CÓ FILE UPLOAD
-if uploaded_file is not None:
-    with st.spinner("Đang chép nội dung file..."):
-        file_ext = uploaded_file.name.split('.')[-1].lower()
-        raw_text = ""
-        
-        if file_ext == 'csv':
-            try:
-                # Cố gắng đọc định dạng CSV
-                df = pd.read_csv(uploaded_file)
-                # Tìm cột có khả năng chứa text
-                text_col = None
-                for col in df.columns:
-                    col_str = str(col).lower()
-                    if 'text' in col_str or 'nội dung' in col_str or 'content' in col_str or 'script' in col_str:
-                        text_col = col
-                        break
-                
-                # Nếu tìm thấy cột trùng khớp lý tưởng
-                if text_col:
-                    raw_text = "\n".join(df[text_col].dropna().astype(str).tolist())
-                # Không thì lấy dữ liệu cột đầu tiên
+# Giới hạn 5 file
+if uploaded_files and len(uploaded_files) > 5:
+    st.error("⚠️ Chỉ được tải lên tối đa **5 file** mỗi lần! Bạn đã tải " + str(len(uploaded_files)) + " file.")
+    uploaded_files = uploaded_files[:5]
+
+# Khởi tạo session state cho kết quả
+if 'results' not in st.session_state:
+    st.session_state.results = []
+if 'processing_done' not in st.session_state:
+    st.session_state.processing_done = False
+
+# Hiển thị danh sách file đã upload
+if uploaded_files:
+    st.markdown(f"**📋 Đã tải lên {len(uploaded_files)} file:**")
+    file_cols = st.columns(min(len(uploaded_files), 5))
+    for i, f in enumerate(uploaded_files):
+        with file_cols[i]:
+            size_kb = len(f.getvalue()) / 1024
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, rgba(102,126,234,0.1), rgba(118,75,162,0.1)); 
+                        border: 1px solid rgba(102,126,234,0.3); border-radius: 12px; padding: 15px; text-align: center;">
+                <div style="font-size: 2rem;">📄</div>
+                <div style="font-weight: 600; font-size: 0.85rem; word-break: break-all;">{f.name}</div>
+                <div style="color: gray; font-size: 0.75rem;">{size_kb:.1f} KB</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.write("")
+    
+    # ===== NÚT DỊCH =====
+    if st.button("🚀 Dịch Tất Cả Song Song", use_container_width=True, type="primary"):
+        # Validate
+        if not api_key_input:
+            st.warning("⚠️ Nhập OpenRouter API Key ở menu Cấu hình bên trái đã nhé!")
+        elif len(api_key_input) < 15:
+            st.warning("⚠️ Có vẻ API Key của bạn không hợp lệ.")
+        elif not final_model_choice:
+            st.warning("⚠️ Vui lòng nhập ID mô hình AI!")
+        else:
+            # Đọc nội dung tất cả files trước
+            file_data = []
+            for f in uploaded_files:
+                file_ext = f.name.split('.')[-1].lower()
+                if file_ext == 'csv':
+                    try:
+                        df = pd.read_csv(f)
+                        text_col = None
+                        for col in df.columns:
+                            col_str = str(col).lower()
+                            if 'text' in col_str or 'nội dung' in col_str or 'content' in col_str or 'script' in col_str:
+                                text_col = col
+                                break
+                        if text_col:
+                            raw_text = "\n".join(df[text_col].dropna().astype(str).tolist())
+                        else:
+                            raw_text = "\n".join(df.iloc[:, 0].dropna().astype(str).tolist())
+                    except Exception as e:
+                        raw_text = f"🚨 Lỗi đọc CSV: {e}"
                 else:
-                    raw_text = "\n".join(df.iloc[:, 0].dropna().astype(str).tolist())
-            except Exception as e:
-                st.error(f"Lỗi đọc file CSV: {e}")
-        else: # TXT
-            raw_text = uploaded_file.getvalue().decode("utf-8")
-        
-        # Làm sạch kịch bản ngay lập tức và đưa vào state
-        st.session_state.cleaned_text = clean_script(raw_text)
-
-# BỐ CỤC 2 CỘT
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("🧹 Kịch Bản Gốc Đã Làm Sạch", divider="red")
-    st.text_area(
-        "Nội dung này đã được bỏ timestamps và tên Speaker:", 
-        value=st.session_state.cleaned_text, 
-        height=450, 
-        disabled=True, 
-        key="clean_area"
-    )
-    
-    # Nút bấm trung tâm
-    if st.session_state.cleaned_text:
-        # Tách dòng trống để nút hiển thị đẹp
-        st.write("") 
-        if st.button("🚀 Bắt Đầu Nhập Vai Dịch Thuật", use_container_width=True):
-            if not api_key_input:
-                st.warning("⚠️ Nhập OpenRouter API Key ở menu Cấu hình bên trái đã nhé!")
-            elif len(api_key_input) < 15:
-                st.warning("⚠️ Có vẻ API Key của bạn không hợp lệ.")
-            else:
-                with st.spinner("✨ AI phản hồi cực gắt... Xin vui lòng đợi! 🪄"):
-                    # Dịch thuật
-                    raw_translation = translate_script(
-                        st.session_state.cleaned_text, 
-                        api_key_input,
-                        model_choice
+                    raw_text = f.getvalue().decode("utf-8")
+                
+                file_data.append((f.name, raw_text))
+            
+            # Xử lý song song 5 luồng
+            st.session_state.results = []
+            
+            progress_bar = st.progress(0, text="⏳ Đang khởi động song song...")
+            status_container = st.container()
+            
+            # Tạo placeholder cho từng file
+            with status_container:
+                status_texts = []
+                for i, (fname, _) in enumerate(file_data):
+                    status_texts.append(st.empty())
+                    status_texts[i].markdown(f"⏳ **{fname}** — Đang chờ...")
+            
+            results = [None] * len(file_data)
+            completed_count = 0
+            
+            with ThreadPoolExecutor(max_workers=5) as executor:
+                # Submit tất cả tasks
+                future_to_idx = {}
+                for idx, (fname, raw_text) in enumerate(file_data):
+                    future = executor.submit(
+                        process_single_file, 
+                        fname, raw_text, 
+                        api_key_input, final_model_choice
                     )
-                    # Format đẹp nhịp nghỉ cho máy ảo TTS
-                    st.session_state.translated_text = format_for_tts(raw_translation)
+                    future_to_idx[future] = idx
+                
+                # Thu thập kết quả khi hoàn thành
+                for future in as_completed(future_to_idx):
+                    idx = future_to_idx[future]
+                    try:
+                        result = future.result()
+                        results[idx] = result
+                        
+                        if result["status"] == "done":
+                            status_texts[idx].markdown(f"✅ **{result['file_name']}** — Hoàn thành!")
+                        else:
+                            status_texts[idx].markdown(f"❌ **{result['file_name']}** — Lỗi!")
+                    except Exception as e:
+                        results[idx] = {
+                            "file_name": file_data[idx][0],
+                            "cleaned": "",
+                            "translated": f"🚨 LỖI: {str(e)}",
+                            "status": "error"
+                        }
+                        status_texts[idx].markdown(f"❌ **{file_data[idx][0]}** — Lỗi: {str(e)}")
+                    
+                    completed_count += 1
+                    progress_bar.progress(
+                        completed_count / len(file_data), 
+                        text=f"✨ Hoàn thành {completed_count}/{len(file_data)} file..."
+                    )
+            
+            progress_bar.progress(1.0, text="🎉 Tất cả đã hoàn thành!")
+            st.session_state.results = results
+            st.session_state.processing_done = True
+            st.rerun()
 
-with col2:
-    st.subheader("🇻🇳 Kịch Bản Tiếng Việt (Output)", divider="rainbow")
-    st.text_area(
-        "Nội dung này đã sẵn sàng để gắn vào Video, TTS:", 
-        value=st.session_state.translated_text, 
-        height=450,
-        key="translated_area"
-    )
+# ===== HIỂN THỊ KẾT QUẢ =====
+if st.session_state.processing_done and st.session_state.results:
+    st.markdown("---")
+    st.markdown("### 🎯 Kết Quả Dịch Thuật")
     
-    # Hiển thị nút download nếu dịch chuẩn (không dính lỗi)
-    if st.session_state.translated_text and not st.session_state.translated_text.startswith("🚨"):
-        st.write("")
+    # Tổng kết trạng thái
+    total = len(st.session_state.results)
+    done_count = sum(1 for r in st.session_state.results if r and r["status"] == "done")
+    error_count = total - done_count
+    
+    metric_cols = st.columns(3)
+    with metric_cols[0]:
+        st.metric("📁 Tổng file", total)
+    with metric_cols[1]:
+        st.metric("✅ Thành công", done_count)
+    with metric_cols[2]:
+        st.metric("❌ Lỗi", error_count)
+    
+    st.write("")
+    
+    # Hiển thị từng file kết quả
+    for i, result in enumerate(st.session_state.results):
+        if result is None:
+            continue
+            
+        # Tạo tên file output
+        base_name = os.path.splitext(result["file_name"])[0]
+        output_name = f"{base_name}_TTS.txt"
+        
+        status_icon = "✅" if result["status"] == "done" else "❌"
+        
+        with st.expander(f"{status_icon} File {i+1}: {result['file_name']}", expanded=(i == 0)):
+            col_left, col_right = st.columns(2)
+            
+            with col_left:
+                st.markdown("**🧹 Kịch bản gốc đã làm sạch:**")
+                st.text_area(
+                    "Nội dung gốc", 
+                    value=result["cleaned"],
+                    height=300,
+                    disabled=True,
+                    key=f"clean_{i}"
+                )
+            
+            with col_right:
+                st.markdown("**🇻🇳 Kịch bản tiếng Việt (TTS-ready):**")
+                st.text_area(
+                    "Bản dịch", 
+                    value=result["translated"],
+                    height=300,
+                    disabled=True,
+                    key=f"trans_{i}"
+                )
+            
+            # Nút tải xuống cho từng file
+            if result["status"] == "done":
+                st.download_button(
+                    label=f"💾 Tải Xuống: {output_name}",
+                    data=result["translated"].encode("utf-8"),
+                    file_name=output_name,
+                    mime="text/plain",
+                    use_container_width=True,
+                    key=f"download_{i}"
+                )
+    
+    # Nút tải tất cả (gộp vào 1 file hoặc tải từng file)
+    if done_count > 1:
+        st.markdown("---")
+        st.markdown("### 📦 Tải Xuống Tất Cả")
+        
+        # Gộp tất cả bản dịch thành 1 file
+        all_translations = []
+        for i, result in enumerate(st.session_state.results):
+            if result and result["status"] == "done":
+                separator = f"{'='*50}\n📄 FILE: {result['file_name']}\n{'='*50}\n\n"
+                all_translations.append(separator + result["translated"])
+        
+        combined_text = "\n\n\n".join(all_translations)
+        
         st.download_button(
-            label="💾 Tải Xuống File TXT Chuẩn Text-to-Speech",
-            data=st.session_state.translated_text.encode("utf-8"),
-            file_name="Kich_Ban_TTS.txt",
+            label="📥 Tải Tất Cả Bản Dịch (Gộp 1 File)",
+            data=combined_text.encode("utf-8"),
+            file_name="TatCa_KichBan_TTS.txt",
             mime="text/plain",
-            use_container_width=True
+            use_container_width=True,
+            key="download_all"
         )
 
 # Footer
 st.markdown("---")
 st.markdown(
     "<p style='text-align: center; color: gray; font-size: 12px;'>"
-    "Tạo bởi Full-Stack AI Developer 🎬 Phát triển bằng Streamlit Python."
+    "Tạo bởi Full-Stack AI Developer 🎬 Phát triển bằng Streamlit Python. | Xử lý song song 5 luồng ⚡"
     "</p>", 
     unsafe_allow_html=True
 )
