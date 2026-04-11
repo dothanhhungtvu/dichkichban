@@ -357,10 +357,12 @@ if st.session_state.processing_done and st.session_state.results:
         if result is None:
             continue
             
-        # Tạo tên file output
-        base_name = os.path.splitext(result["file_name"])[0]
-        output_name = f"{base_name}_TTS.txt"
-        
+        # Tạo tên file output — luôn mặc định là Kich_Ban_TTS.txt
+        if total == 1:
+            output_name = "Kich_Ban_TTS.txt"
+        else:
+            output_name = f"Kich_Ban_TTS_{i+1}.txt"
+    
         status_icon = "✅" if result["status"] == "done" else "❌"
         
         with st.expander(f"{status_icon} File {i+1}: {result['file_name']}", expanded=(i == 0)):
