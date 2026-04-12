@@ -356,13 +356,16 @@ if st.session_state.processing_done and st.session_state.results:
     for i, result in enumerate(st.session_state.results):
         if result is None:
             continue
-            
-        # Tạo tên file output — luôn mặc định là Kich_Ban_TTS.txt
-        if total == 1:
-            output_name = "Kich_Ban_TTS.txt"
+         # Lấy số STT từ tên file gốc (trích xuất cụm số đầu tiên)
+        stt_match = re.search(r'\d+', result['file_name'])
+        if stt_match:
+            stt = stt_match.group(0)
+            output_name = f"Kich_Ban_[{stt}]_TTS.txt"
         else:
-            output_name = f"Kich_Ban_TTS_{i+1}.txt"
-    
+            if total == 1:
+                output_name = "Kich_Ban_TTS.txt"
+            else:
+                output_name = f"Kich_Ban_TTS_{i+1}.txt"    
         status_icon = "✅" if result["status"] == "done" else "❌"
         
         with st.expander(f"{status_icon} File {i+1}: {result['file_name']}", expanded=(i == 0)):
