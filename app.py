@@ -352,13 +352,12 @@ if st.session_state.processing_done and st.session_state.results:
     
     st.write("")
     
-    # Hiển thị từng file kết quả
+   # Hiển thị từng file kết quả
     for i, result in enumerate(st.session_state.results):
         if result is None:
             continue
-         # Lấy số STT từ tên file gốc (trích xuất cụm số đầu tiên)
-                
-            output_name = "Kich_Ban_TTS.txt"
+            
+        output_name = "Kich_Ban_TTS.txt"
             
         status_icon = "✅" if result["status"] == "done" else "❌"
         
