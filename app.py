@@ -357,15 +357,9 @@ if st.session_state.processing_done and st.session_state.results:
         if result is None:
             continue
          # Lấy số STT từ tên file gốc (trích xuất cụm số đầu tiên)
-        stt_match = re.search(r'\d+', result['file_name'])
-        if stt_match:
-            stt = stt_match.group(0)
-            output_name = f"Kich_Ban_[{stt}]_TTS.txt"
-        else:
-            if total == 1:
-                output_name = "Kich_Ban_TTS.txt"
-            else:
-                output_name = f"Kich_Ban_TTS_{i+1}.txt"    
+                
+            output_name = "Kich_Ban_TTS.txt"
+            
         status_icon = "✅" if result["status"] == "done" else "❌"
         
         with st.expander(f"{status_icon} File {i+1}: {result['file_name']}", expanded=(i == 0)):
