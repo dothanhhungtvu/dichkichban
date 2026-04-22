@@ -84,7 +84,7 @@ st.markdown("""
 st.markdown(
     '<div class="title-box">'
     '<h1>🎬 Máy Dịch Kịch Bản Hoạt Hình Thần Kỳ 🚀</h1>'
-    '<p>Tải lên tối đa <b>5 file TXT</b> cùng lúc — xử lý song song siêu tốc!</p>'
+    '<p>Tải lên tối đa <b>5 file TXT</b> cùng lúc — xử lý song song siêu tốc! Chọn ngôn ngữ dịch: 🇻🇳 Việt / 🇺🇸 English</p>'
     '</div>', 
     unsafe_allow_html=True
 )
@@ -150,46 +150,59 @@ def format_for_tts(text):
     # Để giúp máy đọc có nhịp thở tốt, nên để cách 2 dòng giữa các câu thoại ngắn
     return "\n\n".join(lines)
 
-def translate_script(kịch_bản, api_key, model):
-    """Gọi LLM dịch thuật qua OpenRouter"""
+def translate_script(kịch_bản, api_key, model, target_language="vi"):
+    """Gọi LLM dịch thuật qua OpenRouter. target_language: 'vi' hoặc 'en'"""
     try:
         client = OpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key,
         )
         
-        system_prompt = (
-            "Bạn là một biên dịch viên chuyên lồng tiếng phim hoạt hình trẻ em. "
-            "Hãy dịch đoạn hội thoại kịch bản tiếng Trung sau sang tiếng Việt. "
-            "Văn phong cần VUI NHỘN, ĐÁNG YÊU, ngôn từ tự nhiên, phù hợp với video phim hoạt hình ngắn TikTok dành cho trẻ em. "
-            "LUÔN LUÔN ghi nhớ: Tuyệt đối không thêm các chú thích thừa, chỉ trả về nội dung câu thoại thuần túy để máy đọc Text-To-Speech (TTS) có thể đọc mượt mà nhất. "
-            "Tuyệt đối không giải thích, không xin chào."
-        )
+        if target_language == "en":
+            system_prompt = (
+                "You are a professional dubbing translator specializing in children's animated films. "
+                "Translate the following Chinese dialogue script into English. "
+                "The tone must be PLAYFUL, CUTE, and natural — suitable for short TikTok animated videos for kids. "
+                "ALWAYS remember: Do NOT add any extra notes or annotations. Return only the pure dialogue content "
+                "so that a Text-To-Speech (TTS) engine can read it smoothly. "
+                "Do not explain, do not greet."
+            )
+            user_msg = "Please translate the following script:\n\n" + kịch_bản
+        else:
+            system_prompt = (
+                "Bạn là một biên dịch viên chuyên lồng tiếng phim hoạt hình trẻ em. "
+                "Hãy dịch đoạn hội thoại kịch bản tiếng Trung sau sang tiếng Việt. "
+                "Văn phong cần VUI NHỘN, ĐÁNG YÊU, ngôn từ tự nhiên, phù hợp với video phim hoạt hình ngắn TikTok dành cho trẻ em. "
+                "LUÔN LUÔN ghi nhớ: Tuyệt đối không thêm các chú thích thừa, chỉ trả về nội dung câu thoại thuần túy để máy đọc Text-To-Speech (TTS) có thể đọc mượt mà nhất. "
+                "Tuyệt đối không giải thích, không xin chào."
+            )
+            user_msg = "Hãy dịch kịch bản sau:\n\n" + kịch_bản
         
         response = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "Hãy dịch kịch bản sau:\n\n" + kịch_bản}
+                {"role": "user", "content": user_msg}
             ],
-            temperature=0.8 # Tạo độ sáng tạo, mượt mà và tự nhiên cho văn nói
+            temperature=0.8
         )
         
         return response.choices[0].message.content
     except Exception as e:
         return f"🚨 LỖI TỪ API: {str(e)}"
 
-def process_single_file(file_name, raw_text, api_key, model):
+def process_single_file(file_name, raw_text, api_key, model, target_language="vi"):
     """Xử lý 1 file: làm sạch → dịch → format TTS. Trả về dict kết quả."""
     cleaned = clean_script(raw_text)
-    raw_translation = translate_script(cleaned, api_key, model)
+    raw_translation = translate_script(cleaned, api_key, model, target_language)
     
     if raw_translation.startswith("🚨"):
         return {
             "file_name": file_name,
             "cleaned": cleaned,
             "translated": raw_translation,
-            "status": "error"
+            "status": "error",
+            "language": target_language
         }
     
     formatted = format_for_tts(raw_translation)
@@ -197,7 +210,8 @@ def process_single_file(file_name, raw_text, api_key, model):
         "file_name": file_name,
         "cleaned": cleaned,
         "translated": formatted,
-        "status": "done"
+        "status": "done",
+        "language": target_language
     }
 
 
@@ -221,6 +235,46 @@ if 'results' not in st.session_state:
     st.session_state.results = []
 if 'processing_done' not in st.session_state:
     st.session_state.processing_done = False
+if 'target_language' not in st.session_state:
+    st.session_state.target_language = "vi"
+
+# ===== CHỌN NGÔN NGỮ DỊCH =====
+st.markdown("### 🌐 Chọn ngôn ngữ dịch")
+st.markdown("""
+<style>
+.lang-btn-row { display: flex; gap: 16px; margin-bottom: 8px; }
+</style>
+""", unsafe_allow_html=True)
+
+lang_col1, lang_col2, lang_col3 = st.columns([1, 1, 4])
+with lang_col1:
+    vi_selected = st.session_state.target_language == "vi"
+    if st.button(
+        "🇻🇳 Tiếng Việt",
+        type="primary" if vi_selected else "secondary",
+        use_container_width=True,
+        key="btn_vi"
+    ):
+        st.session_state.target_language = "vi"
+        st.session_state.processing_done = False
+        st.rerun()
+with lang_col2:
+    en_selected = st.session_state.target_language == "en"
+    if st.button(
+        "🇺🇸 Tiếng Anh",
+        type="primary" if en_selected else "secondary",
+        use_container_width=True,
+        key="btn_en"
+    ):
+        st.session_state.target_language = "en"
+        st.session_state.processing_done = False
+        st.rerun()
+
+# Hiển thị ngôn ngữ đang chọn
+if st.session_state.target_language == "vi":
+    st.info("✅ Đang dịch sang: **Tiếng Việt** 🇻🇳 — Văn phong vui nhộn, đáng yêu cho TTS.")
+else:
+    st.info("✅ Translating to: **English** 🇺🇸 — Playful, cute tone for children's TTS.")  
 
 # Hiển thị danh sách file đã upload
 if uploaded_files:
@@ -293,11 +347,13 @@ if uploaded_files:
             with ThreadPoolExecutor(max_workers=5) as executor:
                 # Submit tất cả tasks
                 future_to_idx = {}
+                selected_lang = st.session_state.target_language
                 for idx, (fname, raw_text) in enumerate(file_data):
                     future = executor.submit(
                         process_single_file, 
                         fname, raw_text, 
-                        api_key_input, final_model_choice
+                        api_key_input, final_model_choice,
+                        selected_lang
                     )
                     future_to_idx[future] = idx
                 
@@ -375,7 +431,8 @@ if st.session_state.processing_done and st.session_state.results:
                 )
             
             with col_right:
-                st.markdown("**🇻🇳 Kịch bản tiếng Việt (TTS-ready):**")
+                lang_label = "🇻🇳 Kịch bản tiếng Việt (TTS-ready):" if result.get("language", "vi") == "vi" else "🇺🇸 Script in English (TTS-ready):"
+                st.markdown(f"**{lang_label}**")
                 st.text_area(
                     "Bản dịch", 
                     value=result["translated"],
@@ -386,8 +443,9 @@ if st.session_state.processing_done and st.session_state.results:
             
             # Nút tải xuống cho từng file
             if result["status"] == "done":
+                dl_label = f"💾 Tải Xuống: {output_name}" if result.get("language", "vi") == "vi" else f"💾 Download: {output_name}"
                 st.download_button(
-                    label=f"💾 Tải Xuống: {output_name}",
+                    label=dl_label,
                     data=result["translated"].encode("utf-8"),
                     file_name=output_name,
                     mime="text/plain",
