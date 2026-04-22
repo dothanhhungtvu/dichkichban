@@ -132,7 +132,7 @@ def format_for_tts(text):
     return "\n\n".join(lines)
 
 # ── Beeknoee API constants ─────────────────────────────────────────────────
-BEEKNOEE_API_KEY = "sk-bee-3dd2bbc816a440bb84943ebe5ca145c0"
+BEEKNOEE_API_KEY = "sk-bee-062257b79cc04753ba8982f0425ad2f4"
 BEEKNOEE_API_URL = "https://platform.beeknoee.com/api/v1/chat/completions"
 BEEKNOEE_MODEL   = "gemini-2.5-flash-lite"
 # ─────────────────────────────────────────────────────────────────────────────
@@ -168,16 +168,15 @@ def translate_script(kịch_bản, target_language="vi"):
         resp = requests.post(
             BEEKNOEE_API_URL,
             headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {BEEKNOEE_API_KEY}"
+                "Authorization": f"Bearer {BEEKNOEE_API_KEY}",
+                "Content-Type": "application/json"
             },
             json={
                 "model": BEEKNOEE_MODEL,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user",   "content": user_msg}
-                ],
-                "temperature": 0.8
+                ]
             },
             timeout=120
         )
