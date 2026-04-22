@@ -95,17 +95,14 @@ with st.sidebar:
     st.info("Ứng dụng sử dụng **OpenRouter.ai** để gọi mô hình AI siêu thông minh.")
     
     api_key_input = st.text_input(
-        "🔑 Nhập OpenRouter API Key của bạn:", 
+        "🔑 Nhập Beeknoee API Key của bạn:", 
         type="password", 
         value=os.getenv("OPENROUTER_API_KEY", ""),
-        help="Lấy tại https://openrouter.ai/keys"
+        help="Lấy tại Beeknoee"
     )
     
     model_choice = st.selectbox("🤖 Chọn mô hình AI:", [
         "google/gemini-2.5-flash",
-        "openai/gpt-4o-mini",
-        "google/gemini-1.5-pro",
-        "anthropic/claude-3-haiku",
         "Tự nhập model ID (Custom)"
     ], help="Gemini 2.5 Flash rất lý tưởng cho các câu thoại vì tốc độ phản hồi cực nhanh!")
     
@@ -151,10 +148,10 @@ def format_for_tts(text):
     return "\n\n".join(lines)
 
 def translate_script(kịch_bản, api_key, model, target_language="vi"):
-    """Gọi LLM dịch thuật qua OpenRouter. target_language: 'vi' hoặc 'en'"""
+    """Gọi LLM dịch thuật qua Beeknoee. target_language: 'vi' hoặc 'en'"""
     try:
         client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
+            base_url="https://platform.beeknoee.com/api/v1/chat/completions",
             api_key=api_key,
         )
         
