@@ -1,14 +1,13 @@
 import streamlit as st
 import pandas as pd
 import re
-from openai import OpenAI
+import requests
 import os
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import zipfile
 import io
-import requests
 
 # Tải cấu hình từ biến môi trường (nếu có .env)
 load_dotenv()
@@ -92,31 +91,12 @@ st.markdown(
 
 # KHU VỰC SIDEBAR
 with st.sidebar:
-    st.header("⚙️ Cấu hình API")
-    st.info("Ứng dụng sử dụng **OpenRouter.ai** để gọi mô hình AI siêu thông minh.")
-    
-    api_key_input = st.text_input(
-        "🔑 Nhập OpenRouter API Key của bạn:", 
-        type="password", 
-        value=os.getenv("OPENROUTER_API_KEY", ""),
-        help="Lấy tại https://openrouter.ai/keys"
-    )
-    
-    model_choice = st.selectbox("🤖 Chọn mô hình AI:", [
-        "google/gemini-2.5-flash",
-        "openai/gpt-4o-mini",
-        "google/gemini-1.5-pro",
-        "anthropic/claude-3-haiku",
-        "Tự nhập model ID (Custom)"
-    ], help="Gemini 2.5 Flash rất lý tưởng cho các câu thoại vì tốc độ phản hồi cực nhanh!")
-    
-    if model_choice == "Tự nhập model ID (Custom)":
-        final_model_choice = st.text_input("✍️ Nhập ID mô hình:", help="Ví dụ: anthropic/claude-3.5-sonnet")
-    else:
-        final_model_choice = model_choice
-    
+    st.header("⚙️ Thông tin ứng dụng")
+    st.success("Ứng dụng sử dụng **Beeknoee AI** với mô hình **Gemini 2.5 Flash Lite** — tốc độ nhanh, chất lượng cao!")
     st.markdown("---")
     st.markdown("💡 **Mẹo nhỏ:** Tải lên tối đa 5 file TXT cùng lúc, AI sẽ dịch song song tất cả!")
+    st.markdown("🇻🇳 Dịch sang **Tiếng Việt** hoặc 🇺🇸 **Tiếng Anh** bằng 2 nút chọn bên dưới.")
+    st.markdown("🚀 Mô hình: `gemini-2.5-flash-lite`")
 
 
 # CÁC HÀM XỬ LÝ (FUNCTIONS)
@@ -151,10 +131,10 @@ def format_for_tts(text):
     # Để giúp máy đọc có nhịp thở tốt, nên để cách 2 dòng giữa các câu thoại ngắn
     return "\n\n".join(lines)
 
-# ── Beeknoee fallback constants ──────────────────────────────────────────────
-_BEEKNOEE_API_KEY = "sk-bee-3dd2bbc816a440bb84943ebe5ca145c0"
-_BEEKNOEE_API_URL = "https://platform.beeknoee.com/api/v1/chat/completions"
-_BEEKNOEE_MODEL   = "gemini-2.5-flash-lite"
+# ── Beeknoee API constants ─────────────────────────────────────────────────
+BEEKNOEE_API_KEY = "sk-bee-3dd2bbc816a440bb84943ebe5ca145c0"
+BEEKNOEE_API_URL = "https://platform.beeknoee.com/api/v1/chat/completions"
+BEEKNOEE_MODEL   = "gemini-2.5-flash-lite"
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _build_prompts(kịch_bản, target_language):
@@ -181,62 +161,35 @@ def _build_prompts(kịch_bản, target_language):
     return system_prompt, user_msg
 
 
-def _call_beeknoee(system_prompt, user_msg):
-    """Gọi beeknoee API (REST thuần) — dùng làm fallback."""
-    payload = {
-        "model": _BEEKNOEE_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_msg}
-        ],
-        "temperature": 0.8
-    }
-    resp = requests.post(
-        _BEEKNOEE_API_URL,
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {_BEEKNOEE_API_KEY}"
-        },
-        json=payload,
-        timeout=120
-    )
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
-
-
-def translate_script(kịch_bản, api_key, model, target_language="vi"):
-    """Gọi LLM dịch thuật qua OpenRouter. Nếu lỗi → tự động fallback sang beeknoee."""
+def translate_script(kịch_bản, target_language="vi"):
+    """Gọi Beeknoee AI để dịch kịch bản."""
     system_prompt, user_msg = _build_prompts(kịch_bản, target_language)
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user",   "content": user_msg}
-    ]
-
-    # ── Lần 1: OpenRouter ────────────────────────────────────────────────────
     try:
-        client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=api_key,
+        resp = requests.post(
+            BEEKNOEE_API_URL,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {BEEKNOEE_API_KEY}"
+            },
+            json={
+                "model": BEEKNOEE_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user",   "content": user_msg}
+                ],
+                "temperature": 0.8
+            },
+            timeout=120
         )
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.8
-        )
-        return response.choices[0].message.content
-    except Exception as primary_err:
-        pass  # Ghi nhận lỗi nhưng tiếp tục thử fallback
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"🚨 LỖI BEEKNOEE API: {str(e)}"
 
-    # ── Lần 2: Beeknoee fallback ─────────────────────────────────────────────
-    try:
-        return _call_beeknoee(system_prompt, user_msg)
-    except Exception as fallback_err:
-        return f"🚨 LỖI CẢ HAI API — OpenRouter: {primary_err} | Beeknoee: {fallback_err}"
-
-def process_single_file(file_name, raw_text, api_key, model, target_language="vi"):
+def process_single_file(file_name, raw_text, target_language="vi"):
     """Xử lý 1 file: làm sạch → dịch → format TTS. Trả về dict kết quả."""
     cleaned = clean_script(raw_text)
-    raw_translation = translate_script(cleaned, api_key, model, target_language)
+    raw_translation = translate_script(cleaned, target_language)
     
     if raw_translation.startswith("🚨"):
         return {
@@ -338,14 +291,6 @@ if uploaded_files:
     
     # ===== NÚT DỊCH =====
     if st.button("🚀 Dịch Tất Cả Song Song", use_container_width=True, type="primary"):
-        # Validate
-        if not api_key_input:
-            st.warning("⚠️ Nhập OpenRouter API Key ở menu Cấu hình bên trái đã nhé!")
-        elif len(api_key_input) < 15:
-            st.warning("⚠️ Có vẻ API Key của bạn không hợp lệ.")
-        elif not final_model_choice:
-            st.warning("⚠️ Vui lòng nhập ID mô hình AI!")
-        else:
             # Đọc nội dung tất cả files trước
             file_data = []
             for f in uploaded_files:
@@ -393,8 +338,7 @@ if uploaded_files:
                 for idx, (fname, raw_text) in enumerate(file_data):
                     future = executor.submit(
                         process_single_file, 
-                        fname, raw_text, 
-                        api_key_input, final_model_choice,
+                        fname, raw_text,
                         selected_lang
                     )
                     future_to_idx[future] = idx
