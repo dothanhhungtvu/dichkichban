@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import zipfile
 import io
+import requests
 
 # Tải cấu hình từ biến môi trường (nếu có .env)
 load_dotenv()
@@ -95,14 +96,17 @@ with st.sidebar:
     st.info("Ứng dụng sử dụng **OpenRouter.ai** để gọi mô hình AI siêu thông minh.")
     
     api_key_input = st.text_input(
-        "🔑 Nhập Beeknoee API Key của bạn:", 
+        "🔑 Nhập OpenRouter API Key của bạn:", 
         type="password", 
         value=os.getenv("OPENROUTER_API_KEY", ""),
-        help="Lấy tại Beeknoee"
+        help="Lấy tại https://openrouter.ai/keys"
     )
     
     model_choice = st.selectbox("🤖 Chọn mô hình AI:", [
-        "gemini-2.5-flash-lite",
+        "google/gemini-2.5-flash",
+        "openai/gpt-4o-mini",
+        "google/gemini-1.5-pro",
+        "anthropic/claude-3-haiku",
         "Tự nhập model ID (Custom)"
     ], help="Gemini 2.5 Flash rất lý tưởng cho các câu thoại vì tốc độ phản hồi cực nhanh!")
     
@@ -147,46 +151,87 @@ def format_for_tts(text):
     # Để giúp máy đọc có nhịp thở tốt, nên để cách 2 dòng giữa các câu thoại ngắn
     return "\n\n".join(lines)
 
+# ── Beeknoee fallback constants ──────────────────────────────────────────────
+_BEEKNOEE_API_KEY = "sk-bee-3dd2bbc816a440bb84943ebe5ca145c0"
+_BEEKNOEE_API_URL = "https://platform.beeknoee.com/api/v1/chat/completions"
+_BEEKNOEE_MODEL   = "gemini-2.5-flash-lite"
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_prompts(kịch_bản, target_language):
+    """Trả về (system_prompt, user_msg) theo ngôn ngữ đích."""
+    if target_language == "en":
+        system_prompt = (
+            "You are a professional dubbing translator specializing in children's animated films. "
+            "Translate the following Chinese dialogue script into English. "
+            "The tone must be PLAYFUL, CUTE, and natural — suitable for short TikTok animated videos for kids. "
+            "ALWAYS remember: Do NOT add any extra notes or annotations. Return only the pure dialogue content "
+            "so that a Text-To-Speech (TTS) engine can read it smoothly. "
+            "Do not explain, do not greet."
+        )
+        user_msg = "Please translate the following script:\n\n" + kịch_bản
+    else:
+        system_prompt = (
+            "Bạn là một biên dịch viên chuyên lồng tiếng phim hoạt hình trẻ em. "
+            "Hãy dịch đoạn hội thoại kịch bản tiếng Trung sau sang tiếng Việt. "
+            "Văn phong cần VUI NHỘN, ĐÁNG YÊU, ngôn từ tự nhiên, phù hợp với video phim hoạt hình ngắn TikTok dành cho trẻ em. "
+            "LUÔN LUÔN ghi nhớ: Tuyệt đối không thêm các chú thích thừa, chỉ trả về nội dung câu thoại thuần túy để máy đọc Text-To-Speech (TTS) có thể đọc mượt mà nhất. "
+            "Tuyệt đối không giải thích, không xin chào."
+        )
+        user_msg = "Hãy dịch kịch bản sau:\n\n" + kịch_bản
+    return system_prompt, user_msg
+
+
+def _call_beeknoee(system_prompt, user_msg):
+    """Gọi beeknoee API (REST thuần) — dùng làm fallback."""
+    payload = {
+        "model": _BEEKNOEE_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_msg}
+        ],
+        "temperature": 0.8
+    }
+    resp = requests.post(
+        _BEEKNOEE_API_URL,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {_BEEKNOEE_API_KEY}"
+        },
+        json=payload,
+        timeout=120
+    )
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
+
+
 def translate_script(kịch_bản, api_key, model, target_language="vi"):
-    """Gọi LLM dịch thuật qua Beeknoee. target_language: 'vi' hoặc 'en'"""
+    """Gọi LLM dịch thuật qua OpenRouter. Nếu lỗi → tự động fallback sang beeknoee."""
+    system_prompt, user_msg = _build_prompts(kịch_bản, target_language)
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user",   "content": user_msg}
+    ]
+
+    # ── Lần 1: OpenRouter ────────────────────────────────────────────────────
     try:
         client = OpenAI(
-            base_url="https://platform.beeknoee.com/api/v1/chat/completions",
+            base_url="https://openrouter.ai/api/v1",
             api_key=api_key,
         )
-        
-        if target_language == "en":
-            system_prompt = (
-                "You are a professional dubbing translator specializing in children's animated films. "
-                "Translate the following Chinese dialogue script into English. "
-                "The tone must be PLAYFUL, CUTE, and natural — suitable for short TikTok animated videos for kids. "
-                "ALWAYS remember: Do NOT add any extra notes or annotations. Return only the pure dialogue content "
-                "so that a Text-To-Speech (TTS) engine can read it smoothly. "
-                "Do not explain, do not greet."
-            )
-            user_msg = "Please translate the following script:\n\n" + kịch_bản
-        else:
-            system_prompt = (
-                "Bạn là một biên dịch viên chuyên lồng tiếng phim hoạt hình trẻ em. "
-                "Hãy dịch đoạn hội thoại kịch bản tiếng Trung sau sang tiếng Việt. "
-                "Văn phong cần VUI NHỘN, ĐÁNG YÊU, ngôn từ tự nhiên, phù hợp với video phim hoạt hình ngắn TikTok dành cho trẻ em. "
-                "LUÔN LUÔN ghi nhớ: Tuyệt đối không thêm các chú thích thừa, chỉ trả về nội dung câu thoại thuần túy để máy đọc Text-To-Speech (TTS) có thể đọc mượt mà nhất. "
-                "Tuyệt đối không giải thích, không xin chào."
-            )
-            user_msg = "Hãy dịch kịch bản sau:\n\n" + kịch_bản
-        
         response = client.chat.completions.create(
             model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_msg}
-            ],
+            messages=messages,
             temperature=0.8
         )
-        
         return response.choices[0].message.content
-    except Exception as e:
-        return f"🚨 LỖI TỪ API: {str(e)}"
+    except Exception as primary_err:
+        pass  # Ghi nhận lỗi nhưng tiếp tục thử fallback
+
+    # ── Lần 2: Beeknoee fallback ─────────────────────────────────────────────
+    try:
+        return _call_beeknoee(system_prompt, user_msg)
+    except Exception as fallback_err:
+        return f"🚨 LỖI CẢ HAI API — OpenRouter: {primary_err} | Beeknoee: {fallback_err}"
 
 def process_single_file(file_name, raw_text, api_key, model, target_language="vi"):
     """Xử lý 1 file: làm sạch → dịch → format TTS. Trả về dict kết quả."""
