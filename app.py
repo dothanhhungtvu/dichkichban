@@ -102,7 +102,7 @@ with st.sidebar:
     )
     
     model_choice = st.selectbox("🤖 Chọn mô hình AI:", [
-        "google/gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
         "Tự nhập model ID (Custom)"
     ], help="Gemini 2.5 Flash rất lý tưởng cho các câu thoại vì tốc độ phản hồi cực nhanh!")
     
