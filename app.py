@@ -132,7 +132,7 @@ def format_for_tts(text):
     return "\n\n".join(lines)
 
 # ── Beeknoee API constants ─────────────────────────────────────────────────
-BEEKNOEE_API_KEY = "sk-bee-062257b79cc04753ba8982f0425ad2f4"
+BEEKNOEE_API_KEY = "sk-bee-7de98749eea04bc88e284550a0898e3c"
 BEEKNOEE_API_URL = "https://platform.beeknoee.com/api/v1/chat/completions"
 BEEKNOEE_MODEL   = "gemini-2.5-flash-lite"
 # ─────────────────────────────────────────────────────────────────────────────
